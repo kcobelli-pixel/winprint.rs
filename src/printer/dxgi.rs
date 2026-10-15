@@ -181,6 +181,12 @@ impl DxgiPrintContext {
                     &print_ticket_stream,
                 )
                 .map_err(DxgiPrintContextError::FailedToStartJob)?;
+            // The job is queued from here on. If the context cannot be completed, cancel it
+            // (best effort) before returning, so no empty job waits ahead of a later attempt.
+            let cancel_job = |error: DxgiPrintContextError| {
+                let _ = document_target.Cancel();
+                error
+            };
             let print_control_options = D2D1_PRINT_CONTROL_PROPERTIES {
                 rasterDPI: raster_dpi as f32,
                 ..Default::default()
@@ -191,21 +197,26 @@ impl DxgiPrintContext {
                     &document_target,
                     Some(ptr::addr_of!(print_control_options)),
                 )
-                .map_err(DxgiPrintContextError::FailedToStartJob)?;
+                .map_err(DxgiPrintContextError::FailedToStartJob)
+                .map_err(cancel_job)?;
 
-            let completion_source =
-                PrintCompletionSource::new().map_err(DxgiPrintContextError::FailedToCreateEvent)?;
+            let completion_source = PrintCompletionSource::new()
+                .map_err(DxgiPrintContextError::FailedToCreateEvent)
+                .map_err(cancel_job)?;
             let completion_waiter = completion_source.waiter();
             let completion_source: IPrintDocumentPackageStatusEvent = completion_source.into();
             let cpc: IConnectionPointContainer = document_target
                 .cast()
-                .map_err(DxgiPrintContextError::FailedToCreateEvent)?;
+                .map_err(DxgiPrintContextError::FailedToCreateEvent)
+                .map_err(cancel_job)?;
             let status_connection = cpc
                 .FindConnectionPoint(&IPrintDocumentPackageStatusEvent::IID)
-                .map_err(DxgiPrintContextError::FailedToCreateEvent)?;
+                .map_err(DxgiPrintContextError::FailedToCreateEvent)
+                .map_err(cancel_job)?;
             let status_cookie = status_connection
                 .Advise(&completion_source)
-                .map_err(DxgiPrintContextError::FailedToCreateEvent)?;
+                .map_err(DxgiPrintContextError::FailedToCreateEvent)
+                .map_err(cancel_job)?;
 
             Ok(Self {
                 d3d_device,

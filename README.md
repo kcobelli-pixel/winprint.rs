@@ -71,13 +71,25 @@ The narrow changes used by craft-print are:
 
 - DXGI jobs retain the terminal package HRESULT, report failed/canceled states, and
   time out after two minutes waiting for a missing terminal notification after Close.
-  An unsuccessful job requests cancellation; the status connection is unadvised
-  before its COM apartment is released. The timeout does not bound calls into a
-  printer driver or an interactive output-file dialog.
+  An unsuccessful job requests cancellation, also when its print control or status
+  connection cannot be set up; the status connection is unadvised before its COM
+  apartment is released. The timeout does not bound calls into a printer driver or an
+  interactive output-file dialog.
 - `WinPdfPrinter::print_with_progress(path, ticket, callback)` reports `(processed,
   total)` after each successful Direct2D AddPage, preserving one job and its ticket.
   These counts measure page processing, never physical printing or terminal success.
   Existing `FilePrinter::print` remains a wrapper without progress.
+- `GdiPdfPrinter::print_with_progress(path, ticket, callback)` is a GDI raster printer for
+  drivers that refuse the Direct2D/XPS path (some v3 GDI drivers, for example Brother
+  MFC-L3760CDW series, fail `AddPage` with `E_NOINTERFACE`). Each page is rendered by
+  Windows.Data.Pdf to a bitmap at the device's resolution, capped at 300 dpi per axis and
+  12 megapixels to keep the spool small, and stretched over the whole physical sheet,
+  proportions kept, by `StretchDIBits` calls on bands of at most 4 MiB. One
+  `StartDoc`/`EndDoc` document on a DC created with the ticket's DEVMODE keeps copies,
+  collation and duplex; a ticket that cannot become a DEVMODE is an error. Any failure
+  aborts the document (a page whose drawing fails is never ended), and GDI failures carry
+  the thread's last error. Progress is reported as for `WinPdfPrinter`. It does not depend
+  on the `pdfium` feature; when to use it is the caller's decision.
 - Completion regression tests cover a late failed HRESULT, cancellation, inconsistent
   completed HRESULT, missing notification, and repeated terminal notifications.
 
